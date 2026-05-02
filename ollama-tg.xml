@@ -1,0 +1,28 @@
+<service>
+  <id>tg_ollama_bot</id>
+  <name>Telegram ollama Bot Service</name>
+  <description>使用 Python 執行的 Telegram ollama 機器人後端服務</description>
+  <executable>C:\py310\Scripts\pythonw.exe</executable>
+
+  <!-- 系統環境變數 -->
+  <env name="PYTHONUTF8" value="1" />
+
+  <!-- 把 .env 的內容直接寫在這裡，避免服務模式下讀不到 .env -->
+  <env name="TOKEN" value="8626999511:AAFaWne-wXXXXXXXXXXXXXXXXXXXXXXXXXX" />
+  <env name="USER_IDS" value="1234567890" />
+  <env name="ADMIN_IDS" value="1234567890" />
+  <env name="INITMODEL" value="guzesqdro/Claude_Sonnet_4.6_Reduced:latest" />
+  <env name="TIMEOUT" value="9000" />
+  <env name="LOG_LEVEL" value="INFO" />
+  <env name="ALLOW_ALL_USERS_IN_GROUPS" value="0" />
+
+  <arguments>run.py</arguments>
+  <workingdirectory>C:\ollama-telegram</workingdirectory>
+
+  <log mode="roll">
+    <logpath>C:\ollama-telegram\logs</logpath>
+  </log>
+
+  <onfailure action="restart" delay="10 sec"/>
+  <startmode>Automatic</startmode>
+</service>
