@@ -422,22 +422,33 @@ async def ollama_request(message: types.Message):
         # 8. 串流生成 (加入整體超時保護)
         full = ""
         try:
-            # 使用 MAX_RESPONSE_TIME 作為超時限制
-            async with asyncio.timeout(MAX_RESPONSE_TIME): 
+            # 使用 asyncio.wait_for 包裹整個生成過程（Python 3.10 相容）
+            async def generate_stream():
                 async for resp in generate(msgs, modelname):
                     chunk = resp.get("message", {}).get("content", "")
+                    nonlocal full
                     full += chunk
                     if resp.get("done"):
                         break
+            
+            await asyncio.wait_for(generate_stream(), timeout=MAX_RESPONSE_TIME)
         except asyncio.TimeoutError:
             logging.error(f"[ollama_request] 整體請求超時 ({MAX_RESPONSE_TIME}秒)")
             raise Exception(f"Ollama 回應超時，模型處理時間過長 (超過{MAX_RESPONSE_TIME}秒)")
+        except aiohttp.ClientError as e:
+            logging.error(f"[ollama_request] 連接錯誤：{e}")
+            raise Exception(f"無法連接 Ollama 服務：{e}")
 
         # 9. 成功完成：停止計時器並發送結果
-        if stop_event: stop_event.set()
+        if stop_event:
+            stop_event.set()
         if ticker_task:
-            try: await ticker_task
-            except Exception: pass
+            try:
+                await asyncio.wait_for(ticker_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                ticker_task.cancel()
+            except Exception:
+                pass
         
         elapsed = time.time() - start_time
         reply = f"{full}\n\n⚙️ 模型：{modelname}\n⏱️ 時間：{elapsed:.2f} 秒"
@@ -447,16 +458,22 @@ async def ollama_request(message: types.Message):
     except Exception as e:
         logging.error(f"[ollama_request] 錯誤：{e}")
         # 發生錯誤時強制停止計時器
-        if stop_event: stop_event.set()
+        if stop_event:
+            stop_event.set()
         if ticker_task:
-            try: 
+            try:
                 # 給予短暫時間讓計時器任務清理
                 await asyncio.wait_for(ticker_task, timeout=2.0)
             except asyncio.TimeoutError:
                 ticker_task.cancel()
-            except Exception: pass
+            except Exception:
+                pass
         
-        await message.answer("❌ 發生錯誤，請稍後再試\n\n若持續卡住，請檢查 Ollama 服務是否正常運行。")
+        error_msg = str(e)
+        if "無法連接 Ollama" in error_msg or "Connection refused" in error_msg:
+            await message.answer("❌ 無法連接 Ollama 服務\n\n請確認 Ollama 是否正常運行：\n- Windows: `ollama serve`\n- Linux/Mac: `systemctl status ollama`")
+        else:
+            await message.answer(f"❌ 發生錯誤：{error_msg}\n\n若持續卡住，請檢查 Ollama 服務是否正常運行。")
 
 
 # ====== 啟動 ======
