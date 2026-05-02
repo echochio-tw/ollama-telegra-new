@@ -220,7 +220,7 @@ class MessageHelper:
     
     @staticmethod
     async def safe_edit(message: types.Message, text: str, msg_id: int):
-        """安全編輯訊息，處理速率限制"""
+        """安全編輯訊息，處理速率限制和格式錯誤"""
         try:
             await bot.edit_message_text(
                 text=text,
@@ -233,6 +233,17 @@ class MessageHelper:
             if "message is not modified" not in error_msg:
                 if "flood control" in error_msg:
                     logging.warning("[MessageHelper.safe_edit] 觸發速率限制，跳過本次更新")
+                elif "can't parse entities" in error_msg or "parse entities" in error_msg:
+                    # Markdown 解析錯誤，改用純文字
+                    try:
+                        await bot.edit_message_text(
+                            text=text,
+                            chat_id=message.chat.id,
+                            message_id=msg_id,
+                            parse_mode=None
+                        )
+                    except Exception as fallback_err:
+                        logging.warning(f"[MessageHelper.safe_edit] 純文字編輯也失敗：{fallback_err}")
                 else:
                     logging.warning(f"[MessageHelper.safe_edit] 編輯失敗：{e}")
 
