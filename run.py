@@ -204,11 +204,19 @@ class MessageHelper:
         """安全發送訊息，自動處理格式錯誤"""
         try:
             await message.answer(text, parse_mode=ParseMode.MARKDOWN)
-        except Exception:
-            try:
-                await message.answer(text)
-            except Exception:
-                await message.answer(f"內容格式錯誤：\n{text[:1000]}...")
+        except Exception as e:
+            error_str = str(e).lower()
+            if "can't parse entities" in error_str or "parse entities" in error_str:
+                # Markdown 解析錯誤，改用純文字
+                try:
+                    await message.answer(text, parse_mode=None)
+                except Exception:
+                    await message.answer(f"內容格式錯誤：\n{text[:1000]}...")
+            else:
+                try:
+                    await message.answer(text)
+                except Exception:
+                    await message.answer(f"內容格式錯誤：\n{text[:1000]}...")
     
     @staticmethod
     async def safe_edit(message: types.Message, text: str, msg_id: int):
