@@ -267,6 +267,42 @@ class WaitingTicker:
         finally:
             logging.info(f"[WaitingTicker] 計時器結束，總共更新 {self.count} 次")
 
+
+# ====== 輔助函數（供非同步處理器使用） ======
+async def model_list() -> List[Dict[str, Any]]:
+    """獲取模型列表"""
+    return await ollama_service.get_model_list()
+
+async def generate(messages: List[Dict[str, Any]], model: str):
+    """串流生成回應"""
+    async for resp in ollama_service.generate(messages, model):
+        yield resp
+
+async def process_image(message: types.Message) -> str:
+    """處理圖片"""
+    return await InputProcessor.process_image(message)
+
+async def process_voice(message: types.Message) -> str:
+    """處理語音"""
+    return await InputProcessor.process_voice(message)
+
+async def safe_send(message: types.Message, text: str):
+    """安全發送訊息"""
+    await MessageHelper.safe_send(message, text)
+
+async def safe_edit(message: types.Message, text: str, msg_id: int):
+    """安全編輯訊息"""
+    await MessageHelper.safe_edit(message, text, msg_id)
+
+async def save_chat(user_id: int, role: str, content: str):
+    """儲存聊天記錄"""
+    await db_manager.save_chat(user_id, role, content)
+
+def init_db():
+    """初始化資料庫"""
+    db_manager.init_db()
+
+
 # ====== 指令：/start ======
 @dp.message(CommandStart())
 async def cmd_start(msg: types.Message):
@@ -320,36 +356,9 @@ async def handle(msg: types.Message):
         return await msg.answer("❌ 無使用權限")
     await ollama_request(msg)
 
-async def _waiting_ticker(message: types.Message, start_time: float, ack_msg_id: int, stop_event: asyncio.Event):
-    """每 3 秒更新一次等待狀態，並監聽停止信號"""
-    count = 0
-    model_display = modelname.split('/')[-1] if '/' in modelname else modelname
-    logging.info(f"[ticker] 計時器啟動，模型：{model_display}")
-    
-    try:
-        while not stop_event.is_set():
-            try:
-                # 使用 wait_for 確保能即時響應停止信號
-                await asyncio.wait_for(stop_event.wait(), timeout=3.0)
-                break # 如果 wait_for 完成，表示 stop_event 被設置了
-            except asyncio.TimeoutError:
-                pass # 正常超時，繼續執行
-            
-            if stop_event.is_set():
-                break
-                
-            elapsed = int(time.time() - start_time)
-            text = f"⏳ 💬 文字 處理中，模型：{model_display}\n已等待 {elapsed} 秒…"
-            await safe_edit(message, text, ack_msg_id)
-            count += 1
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        logging.error(f"[ticker] 錯誤：{e}")
-    finally:
-        logging.info(f"[ticker] 計時器結束，總共更新 {count} 次")
 
 async def ollama_request(message: types.Message):
+    """處理 Ollama 請求的主函數"""
     ticker_task = None
     stop_event = None
     
@@ -399,21 +408,22 @@ async def ollama_request(message: types.Message):
 
         # 7. 啟動計時器
         stop_event = asyncio.Event()
-        ticker_task = asyncio.create_task(_waiting_ticker(message, start_time, ack_msg_id, stop_event))
+        ticker = WaitingTicker(message, start_time, ack_msg_id, stop_event)
+        ticker_task = asyncio.create_task(ticker.run())
 
         # 8. 串流生成 (加入整體超時保護)
         full = ""
         try:
-            # 設定最長等待時間為 10 分鐘，避免無限卡死
-            async with asyncio.timeout(600): 
+            # 使用 MAX_RESPONSE_TIME 作為超時限制
+            async with asyncio.timeout(MAX_RESPONSE_TIME): 
                 async for resp in generate(msgs, modelname):
                     chunk = resp.get("message", {}).get("content", "")
                     full += chunk
                     if resp.get("done"):
                         break
         except asyncio.TimeoutError:
-            logging.error("[ollama_request] 整體請求超時 (10分鐘)")
-            raise Exception("Ollama 回應超時，模型處理時間過長")
+            logging.error(f"[ollama_request] 整體請求超時 ({MAX_RESPONSE_TIME}秒)")
+            raise Exception(f"Ollama 回應超時，模型處理時間過長 (超過{MAX_RESPONSE_TIME}秒)")
 
         # 9. 成功完成：停止計時器並發送結果
         if stop_event: stop_event.set()
@@ -424,7 +434,7 @@ async def ollama_request(message: types.Message):
         elapsed = time.time() - start_time
         reply = f"{full}\n\n⚙️ 模型：{modelname}\n⏱️ 時間：{elapsed:.2f} 秒"
         await safe_send(message, reply)
-        save_chat(message.from_user.id, "assistant", full)
+        await save_chat(message.from_user.id, "assistant", full)
 
     except Exception as e:
         logging.error(f"[ollama_request] 錯誤：{e}")
@@ -438,7 +448,8 @@ async def ollama_request(message: types.Message):
                 ticker_task.cancel()
             except Exception: pass
         
-        await message.answer("❌ 發生錯誤，請稍後再試")
+        await message.answer("❌ 發生錯誤，請稍後再試\n\n若持續卡住，請檢查 Ollama 服務是否正常運行。")
+
 
 # ====== 啟動 ======
 async def main():
