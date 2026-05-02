@@ -412,7 +412,7 @@ async def ollama_request(message: types.Message):
         # 5. ACK (初始訊息)
         model_display = modelname.split('/')[-1] if '/' in modelname else modelname
         ack_text = f"⏳ 💬 {input_label} 處理中，模型：{model_display}\n已等待 0 秒…"
-        ack_msg = await message.answer(ack_text, parse_mode=ParseMode.MARKDOWN)
+        ack_msg = await message.answer(ack_text, parse_mode=None)
         ack_msg_id = ack_msg.message_id
 
         # 6. 組裝訊息
