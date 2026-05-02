@@ -246,13 +246,21 @@ class WaitingTicker:
         logging.info(f"[WaitingTicker] 計時器啟動，模型：{self.model_display}")
         
         try:
-            while not self.stop_event.is_set():
+            while True:
+                # 先檢查是否應該停止
+                if self.stop_event.is_set():
+                    break
+                
+                # 等待 TICKER_INTERVAL 秒，或直到 stop_event 被設置
                 try:
                     await asyncio.wait_for(self.stop_event.wait(), timeout=TICKER_INTERVAL)
+                    # 如果 wait() 完成（沒有拋出 TimeoutError），表示 stop_event 被設置了
                     break
                 except asyncio.TimeoutError:
+                    # 超時表示還沒收到停止信號，繼續更新計時器
                     pass
                 
+                # 再次確認是否應該停止（防止競態條件）
                 if self.stop_event.is_set():
                     break
                     

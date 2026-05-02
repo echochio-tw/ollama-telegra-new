@@ -34,7 +34,7 @@ target/
 coverage/
 htmlcov/
 
-# Testing
-.pytest_cache/
+# Cache
 .mypy_cache/
+.pytest_cache/
 ```
